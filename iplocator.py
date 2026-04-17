@@ -207,7 +207,7 @@ class PortScanner:
 def exibir_resultado(info: Dict):
     
     print("\n" + "="*40)
-    print(f"📍 LOCALIZAÇÃO ENCONTRADA")
+    print("📍 LOCALIZAÇÃO ENCONTRADA")
     print("="*40)
     print(f"🌐 IP:           {info.get('query', 'N/A')}")
     print(f"🏳️ País:         {info.get('country', 'N/A')} ({info.get('countryCode', 'N/A')})")
@@ -369,12 +369,15 @@ def menu():
         except KeyboardInterrupt:
             print("\n\n[!] Encerrando...")
             break
-        except Exception as e:
+        except (ValueError, TypeError, OSError, socket.error) as e:
             print(f"\n[!] Erro inesperado: {e}")
 
 if __name__ == "__main__":
     try:
         menu()
-    except Exception as e:
+    except (KeyboardInterrupt, SystemExit):
+        print("\n[!] Programa encerrado.")
+        sys.exit(0)
+    except (OSError, ValueError, TypeError, RuntimeError) as e:
         print(f"\n[!] Erro fatal: {e}")
         sys.exit(1)
