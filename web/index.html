@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IP-Locator — OSINT de geolocalização, portas e WHOIS</title>
+  <meta name="description" content="Interface web estática (Vue 3) para o IP-Locator: geolocalização de IPs, scanner de portas com detecção de serviços e consulta WHOIS/RDAP." />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app" v-cloak>
+    <header class="topo">
+      <div class="marca">
+        <span class="logo" aria-hidden="true">◎</span>
+        <div>
+          <h1>IP-Locator</h1>
+          <p class="sub">Geolocalização · Portas · WHOIS</p>
+        </div>
+      </div>
+      <div class="status">
+        <span class="ponto" :class="apiOk ? 'on' : 'off'" aria-hidden="true"></span>
+        <span v-if="apiOk">API {{ versao || '' }} conectada</span>
+        <span v-else>API offline</span>
+        <button class="btn-fantasma" type="button" @click="verificarApi">reconectar</button>
+      </div>
+    </header>
+
+    <nav class="abas" role="tablist" aria-label="Seções">
+      <button
+        v-for="aba in abas"
+        :key="aba.id"
+        type="button"
+        role="tab"
+        class="aba"
+        :class="{ ativa: abaAtiva === aba.id }"
+        :aria-selected="abaAtiva === aba.id"
+        @click="abaAtiva = aba.id"
+      >{{ aba.rotulo }}</button>
+    </nav>
+
+    <p v-if="!apiOk" class="alerta">
+      Não foi possível falar com a API local. Rode
+      <code>python iplocator.py --serve</code> na raiz do projeto
+      (padrão: <code>http://127.0.0.1:8000</code>).
+    </p>
+
+    <!-- ============================ GEO ============================ -->
+    <section v-show="abaAtiva === 'geo'" class="painel">
+      <form class="busca" @submit.prevent="consultarGeo">
+        <input
+          v-model="alvoGeo"
+          type="text"
+          placeholder="8.8.8.8, github.com…"
+          spellcheck="false"
+          autocomplete="off"
+          aria-label="IP ou domínio"
+        />
+        <button class="btn" type="submit" :disabled="carregandoGeo">
+          {{ carregandoGeo ? 'Consultando…' : 'Localizar' }}
+        </button>
+      </form>
+
+      <div class="chips">
+        <button v-for="exemplo in exemplos" :key="exemplo" type="button" @click="alvoGeo = exemplo; consultarGeo()">
+          {{ exemplo }}
+        </button>
+      </div>
+
+      <fieldset class="provedores">
+        <legend>Provedores (ordem de fallback)</legend>
+        <label v-for="nome in provedores" :key="nome">
+          <input type="checkbox" :value="nome" v-model="provedoresAtivos" />
+          <span>{{ nome }}</span>
+        </label>
+      </fieldset>
+
+      <p v-if="erroGeo" class="alerta">{{ erroGeo }}</p>
+
+      <article v-if="geo" class="cartao">
+        <div class="cartao-topo">
+          <h2>
+            {{ geo.ip }}
+            <span class="selo">{{ geo.provider }}</span>
+            <span v-if="geo.cache" class="selo cache">cache</span>
+          </h2>
+          <button class="btn-fantasma" type="button" @click="copiar(geo)">copiar JSON</button>
+        </div>
+        <dl class="grade">
+          <div v-for="item in camposGeoVisiveis" :key="item.chave">
+            <dt>{{ item.rotulo }}</dt>
+            <dd>{{ item.valor }}</dd>
+          </div>
+        </dl>
+        <div class="links" v-if="geo.maps_url">
+          <a :href="geo.maps_url" target="_blank" rel="noopener">Google Maps</a>
+          <a :href="geo.osm_url" target="_blank" rel="noopener">OpenStreetMap</a>
+        </div>
+        <details v-if="geoFallbacks.length">
+          <summary>Provedores que falharam ({{ geoFallbacks.length }})</summary>
+          <ul>
+            <li v-for="erro in geoFallbacks" :key="erro.provider">
+              <strong>{{ erro.provider }}</strong>: {{ erro.erro }}
+            </li>
+          </ul>
+        </details>
+      </article>
+    </section>
+
+    <!-- ============================ SCAN =========================== -->
+    <section v-show="abaAtiva === 'scan'" class="painel">
+      <form class="busca" @submit.prevent="escanear">
+        <input
+          v-model="alvoScan"
+          type="text"
+          placeholder="IP ou domínio para escanear"
+          spellcheck="false"
+          autocomplete="off"
+          aria-label="Alvo do scan"
+        />
+        <select v-model="modoScan" aria-label="Modo do scan">
+          <option value="comuns">Portas comuns</option>
+          <option value="intervalo">Intervalo</option>
+        </select>
+        <template v-if="modoScan === 'intervalo'">
+          <input v-model.number="inicioScan" type="number" min="1" max="65535" aria-label="Porta inicial" />
+          <input v-model.number="fimScan" type="number" min="1" max="65535" aria-label="Porta final" />
+        </template>
+        <label class="check">
+          <input type="checkbox" v-model="servicosScan" />
+          <span>detectar serviços</span>
+        </label>
+        <button class="btn" type="submit" :disabled="carregandoScan">
+          {{ carregandoScan ? 'Escaneando…' : 'Escanear' }}
+        </button>
+      </form>
+
+      <p class="dica">Use apenas em alvos próprios ou com autorização explícita.</p>
+      <p v-if="erroScan" class="alerta">{{ erroScan }}</p>
+
+      <div v-if="scan" class="cartao">
+        <div class="cartao-topo">
+          <h2>
+            {{ scan.host }}
+            <span class="selo">{{ scan.modo }}</span>
+            <span v-if="scan.cache" class="selo cache">cache</span>
+          </h2>
+          <button class="btn-fantasma" type="button" @click="copiar(scan)">copiar JSON</button>
+        </div>
+        <p class="metricas">
+          <span>{{ scan.total_abertas }} porta(s) aberta(s)</span>
+          <span>{{ scan.total_verificadas }} verificada(s)</span>
+          <span>{{ scan.duracao }}s</span>
+        </p>
+        <p v-if="!scan.resultados.length" class="vazio">Nenhuma porta aberta encontrada.</p>
+        <div class="tabela-rolagem" v-else>
+          <table>
+            <thead>
+              <tr>
+                <th>Porta</th>
+                <th>Serviço</th>
+                <th>Produto</th>
+                <th>TLS</th>
+                <th>Banner / certificado</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in scan.resultados" :key="item.porta">
+                <td><strong>{{ item.porta }}</strong></td>
+                <td>{{ item.servico }}</td>
+                <td>
+                  <span v-if="item.produto">{{ item.produto }}</span>
+                  <span v-if="item.versao" class="apagado"> {{ item.versao }}</span>
+                  <span v-if="!item.produto && !item.versao" class="apagado">—</span>
+                </td>
+                <td>
+                  <span v-if="item.tls" class="selo mini">{{ item.tls_versao || 'TLS' }}</span>
+                  <span v-else class="apagado">—</span>
+                </td>
+                <td class="banner">
+                  <span v-if="item.certificado && item.certificado.cn">CN={{ item.certificado.cn }}</span>
+                  <span v-else-if="item.banner">{{ item.banner }}</span>
+                  <span v-else class="apagado">—</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- =========================== WHOIS =========================== -->
+    <section v-show="abaAtiva === 'whois'" class="painel">
+      <form class="busca" @submit.prevent="consultarWhois">
+        <input
+          v-model="alvoWhois"
+          type="text"
+          placeholder="8.8.8.8, github.com…"
+          spellcheck="false"
+          autocomplete="off"
+          aria-label="IP ou domínio para WHOIS"
+        />
+        <button class="btn" type="submit" :disabled="carregandoWhois">
+          {{ carregandoWhois ? 'Consultando…' : 'Consultar' }}
+        </button>
+      </form>
+
+      <p v-if="erroWhois" class="alerta">{{ erroWhois }}</p>
+
+      <article v-if="whois" class="cartao">
+        <div class="cartao-topo">
+          <h2>
+            {{ whois.alvo }}
+            <span class="selo">{{ whois.fonte }}</span>
+            <span v-if="whois.cache" class="selo cache">cache</span>
+          </h2>
+          <button class="btn-fantasma" type="button" @click="copiar(whois)">copiar JSON</button>
+        </div>
+        <dl class="grade">
+          <div v-for="item in camposWhoisVisiveis" :key="item.chave">
+            <dt>{{ item.rotulo }}</dt>
+            <dd>{{ item.valor }}</dd>
+          </div>
+        </dl>
+        <details v-if="brutoWhois">
+          <summary>Resposta bruta</summary>
+          <pre>{{ brutoWhois }}</pre>
+        </details>
+      </article>
+    </section>
+
+    <!-- =========================== CACHE =========================== -->
+    <section v-show="abaAtiva === 'cache'" class="painel">
+      <div class="cartao-topo">
+        <h2>Cache de resultados</h2>
+        <div class="acoes">
+          <button class="btn-fantasma" type="button" @click="carregarCache">atualizar</button>
+          <button class="btn-perigo" type="button" :disabled="carregandoCache" @click="limparCache">
+            limpar cache
+          </button>
+        </div>
+      </div>
+      <p v-if="erroCache" class="alerta">{{ erroCache }}</p>
+      <div v-if="cacheStats" class="cartoes">
+        <div class="mini-cartao">
+          <span class="numero">{{ cacheStats.entradas }}</span>
+          <span class="legenda">entradas</span>
+        </div>
+        <div class="mini-cartao">
+          <span class="numero">{{ (cacheStats.taxa_acerto * 100).toFixed(1) }}%</span>
+          <span class="legenda">taxa de acerto</span>
+        </div>
+        <div class="mini-cartao">
+          <span class="numero">{{ cacheStats.hits }}</span>
+          <span class="legenda">hits</span>
+        </div>
+        <div class="mini-cartao">
+          <span class="numero">{{ cacheStats.misses }}</span>
+          <span class="legenda">misses</span>
+        </div>
+      </div>
+      <p v-if="cacheStats" class="dica">
+        Diretório: <code>{{ cacheStats.diretorio || 'cache desativado' }}</code>
+      </p>
+      <div class="tabela-rolagem" v-if="cacheStats && cacheStats.namespaces">
+        <table>
+          <thead>
+            <tr>
+              <th>Namespace</th>
+              <th>TTL</th>
+              <th>Entradas</th>
+              <th>Hits</th>
+              <th>Misses</th>
+              <th>Expirados</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(dados, nome) in cacheStats.namespaces" :key="nome">
+              <td><strong>{{ nome }}</strong></td>
+              <td>{{ Math.round(dados.ttl) }}s</td>
+              <td>{{ dados.entradas }}</td>
+              <td>{{ dados.hits }}</td>
+              <td>{{ dados.misses }}</td>
+              <td>{{ dados.expirados }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <p class="toast" v-if="aviso">{{ aviso }}</p>
+
+    <footer class="rodape">
+      <span>IP-Locator {{ versao }} — uso educacional e em redes autorizadas.</span>
+      <span>API: <code>{{ apiBase || 'mesma origem' }}</code></span>
+    </footer>
+  </div>
+
+  <noscript>
+    <p style="padding: 2rem; font-family: sans-serif">
+      Esta interface precisa de JavaScript habilitado. Use a CLI:
+      <code>python iplocator.py</code>.
+    </p>
+  </noscript>
+
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
+
