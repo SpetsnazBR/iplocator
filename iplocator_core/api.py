@@ -8,6 +8,8 @@ para a rede sem intenção explícita (use ``--host 0.0.0.0`` se necessário).
 from __future__ import annotations
 
 import json
+import os
+import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -22,8 +24,40 @@ from .validation import identificar_alvo, resolver_dominio
 from .version import __version__
 from .whois import WhoisClient
 
-#: Diretório da interface web (``web/`` na raiz do repositório).
-DIRETORIO_WEB_PADRAO = Path(__file__).resolve().parent.parent / "web"
+#: Variável de ambiente que sobrescreve o diretório da interface web.
+ENV_WEB_DIR = "IPLOCATOR_WEB_DIR"
+
+
+def resolver_diretorio_web() -> Path:
+    """Descobre o diretório da interface estática.
+
+    Ordem de busca:
+
+    1. ``IPLOCATOR_WEB_DIR`` (útil para servir a UI de outro lugar);
+    2. ``web/`` na raiz do repositório (execução via ``python iplocator.py``);
+    3. ``<prefix>/share/iplocator/web`` (instalação via ``pip``/wheel);
+    4. ``./web`` (relativo ao diretório corrente).
+
+    A primeira opção que contenha ``index.html`` vence; se nenhuma existir,
+    devolve o primeiro candidato para que a mensagem de erro mostre o caminho
+    mais provável.
+    """
+    candidatos = []
+    override = os.environ.get(ENV_WEB_DIR, "").strip()
+    if override:
+        candidatos.append(Path(override).expanduser())
+    candidatos.append(Path(__file__).resolve().parent.parent / "web")
+    candidatos.append(Path(sys.prefix) / "share" / "iplocator" / "web")
+    candidatos.append(Path.cwd() / "web")
+    for candidato in candidatos:
+        if (candidato / "index.html").is_file():
+            return candidato
+    return candidatos[0]
+
+
+#: Diretório da interface web resolvido na importação do módulo.
+DIRETORIO_WEB_PADRAO = resolver_diretorio_web()
+
 
 #: Limite de portas por requisição de scan (proteção contra abuso acidental).
 MAX_PORTAS_POR_CONSULTA = 4096

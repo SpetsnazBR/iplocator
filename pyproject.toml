@@ -47,6 +47,11 @@ py-modules = ["iplocator"]
 [tool.setuptools.packages.find]
 include = ["iplocator_core*"]
 
+# A interface web fica fora do pacote Python; estes data-files a colocam em
+# <prefix>/share/iplocator/web, caminho consultado por resolver_diretorio_web().
+[tool.setuptools.data-files]
+"share/iplocator/web" = ["web/index.html", "web/app.js", "web/styles.css"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
@@ -55,7 +60,7 @@ filterwarnings = ["ignore::DeprecationWarning"]
 
 [tool.pyright]
 # Mesmo motor do Pylance (VS Code). Rode: python -m pyright
-include = ["iplocator.py", "iplocator_core", "tests"]
+include = ["iplocator.py", "iplocator_core", "tests", "tools"]
 exclude = [".venv", "**/__pycache__", "web", "build", "dist"]
 pythonVersion = "3.9"
 typeCheckingMode = "basic"

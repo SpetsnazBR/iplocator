@@ -16,6 +16,7 @@ from iplocator_core.api import (
     _booleano,
     _numero,
     criar_servidor,
+    resolver_diretorio_web,
     resolver_estatico,
 )
 from iplocator_core.geo import IPLocator
@@ -261,4 +262,25 @@ def test_helpers_de_query() -> None:
     assert _numero("2.5", 1.0, 0.1, 10.0) == 2.5
     assert _numero("99", 1.0, 0.1, 10.0) == 10.0
     assert _numero("abc", 1.0, 0.1, 10.0) == 1.0
+
+
+def test_diretorio_web_padrao_contem_a_interface() -> None:
+    assert (DIRETORIO_WEB_PADRAO / "index.html").is_file()
+    assert (DIRETORIO_WEB_PADRAO / "app.js").is_file()
+    assert (DIRETORIO_WEB_PADRAO / "styles.css").is_file()
+
+
+def test_resolver_diretorio_web_usa_env(monkeypatch, tmp_path) -> None:
+    web = tmp_path / "web-custom"
+    web.mkdir()
+    (web / "index.html").write_text("<html></html>", encoding="utf-8")
+    monkeypatch.setenv("IPLOCATOR_WEB_DIR", str(web))
+    assert resolver_diretorio_web() == web
+
+
+def test_resolver_diretorio_web_ignora_env_invalido(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("IPLOCATOR_WEB_DIR", str(tmp_path / "nao-existe"))
+    encontrado = resolver_diretorio_web()
+    assert (encontrado / "index.html").is_file()
+    assert encontrado == DIRETORIO_WEB_PADRAO
 
