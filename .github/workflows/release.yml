@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag a publicar (ex.: v2.0.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  publicar:
+    name: Publicar release no GitHub
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - name: Checkout completo (histórico para as notas)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Validar a tag e extrair as notas do CHANGELOG
+        run: python tools/notas_release.py "$TAG" --saida /tmp/notas.md
+
+      - name: Rodar a suíte antes de publicar
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+          python -m pytest -q
+
+      - name: Construir sdist e wheel
+        run: |
+          pip install build
+          python -m build
+
+      - name: Criar (ou atualizar) a release com os artefatos
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --notes-file /tmp/notas.md
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* \
+              --title "IP-Locator $TAG" \
+              --notes-file /tmp/notas.md \
+              --verify-tag
+          fi
+          gh release view "$TAG" --json url,assets --jq '.url, (.assets[].name)'
