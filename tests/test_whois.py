@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import List
+
 import pytest
 import requests
 
@@ -231,7 +233,7 @@ def test_sem_cache_nao_guarda(cache) -> None:
 
 def test_consultar_porta43_le_resposta(monkeypatch) -> None:
     respostas = {"whois.iana.org": WHOIS_TEXTO_VAZIO, "whois.arin.net": WHOIS_TEXTO}
-    consultados = []
+    consultados: List[tuple] = []
 
     def envio(servidor, consulta, timeout=10.0, porta=43):
         consultados.append((servidor, consulta))
@@ -239,6 +241,7 @@ def test_consultar_porta43_le_resposta(monkeypatch) -> None:
 
     monkeypatch.setattr(modulo_whois, "_enviar_consulta", envio)
     dados = consultar_porta43("8.8.8.8")
+    assert dados is not None
     assert dados["netname"] == "GOGL"
     assert dados["servidor"] == "whois.arin.net"
     assert consultados[0][0] == "whois.iana.org"

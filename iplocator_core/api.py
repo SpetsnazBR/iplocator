@@ -125,9 +125,9 @@ class ManipuladorAPI(BaseHTTPRequestHandler):
     def contexto(self) -> ContextoAPI:
         return getattr(self.server, "contexto")
 
-    def log_message(self, fmt: str, *args: Any) -> None:
+    def log_message(self, format: str, *args: Any) -> None:  # noqa: A002 - nome da stdlib
         if getattr(self.server, "verbose", False):
-            super().log_message(fmt, *args)
+            super().log_message(format, *args)
 
     def _cabecalhos_comuns(self) -> None:
         self.send_header("Access-Control-Allow-Origin", "*")

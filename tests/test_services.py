@@ -96,7 +96,7 @@ def servidor_http():
             self.send_header("Content-Type", "text/html")
             self.end_headers()
 
-        def log_message(self, *_args) -> None:
+        def log_message(self, format: str, *args) -> None:  # noqa: A002 - nome da stdlib
             pass
 
     servidor = http.server.HTTPServer(("127.0.0.1", 0), Manipulador)

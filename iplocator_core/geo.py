@@ -15,6 +15,7 @@ import requests
 
 from .cache import CacheManager
 from .http import criar_sessao
+from .protocols import SessaoHTTP
 from .validation import (
     identificar_alvo,
     is_ip_reservado,
@@ -380,13 +381,13 @@ class IPLocator:
         use_https: bool = False,
         providers: Optional[Sequence[str]] = None,
         cache: Optional[CacheManager] = None,
-        session: Optional[requests.Session] = None,
+        session: Optional[SessaoHTTP] = None,
         timeout: float = 10.0,
         min_request_interval: float = 0.0,
     ) -> None:
         self.use_https = use_https
         self.timeout = float(timeout)
-        self.session = session if session is not None else criar_sessao()
+        self.session: SessaoHTTP = session if session is not None else criar_sessao()
         self.cache = cache if cache is not None else CacheManager()
         self.min_request_interval = max(0.0, float(min_request_interval))
         self.providers = criar_provedores(providers, use_https)

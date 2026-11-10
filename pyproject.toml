@@ -32,7 +32,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7"]
+dev = ["pytest>=7", "pyright>=1.1"]
 
 [project.scripts]
 iplocator = "iplocator:main"
@@ -52,3 +52,12 @@ testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-q"
 filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.pyright]
+# Mesmo motor do Pylance (VS Code). Rode: python -m pyright
+include = ["iplocator.py", "iplocator_core", "tests"]
+exclude = [".venv", "**/__pycache__", "web", "build", "dist"]
+pythonVersion = "3.9"
+typeCheckingMode = "basic"
+extraPaths = [".", "tests"]
+reportMissingTypeStubs = "none"

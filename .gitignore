@@ -98,7 +98,8 @@ dmypy.json
 
 cython_debug/
 
-.vscode/
+# Mantém apenas as configurações de editor compartilhadas do projeto
+.vscode/*
 !.vscode/settings.json
 !.vscode/tasks.json
 !.vscode/launch.json

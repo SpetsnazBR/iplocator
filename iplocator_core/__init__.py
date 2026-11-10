@@ -17,6 +17,7 @@ from .geo import (
     normalizar_resultado,
     provedores_disponiveis,
 )
+from .protocols import ConsultaWhois, LocalizadorGeo, RespostaHTTP, SessaoHTTP
 from .scanner import PortScanner, normalizar_intervalo, verificar_portas
 from .services import (
     PORTAS_CONHECIDAS,
@@ -54,6 +55,11 @@ __all__ = [
     "criar_provedores",
     "normalizar_resultado",
     "provedores_disponiveis",
+    # protocolos de injeção (sessão/localizador/WHOIS)
+    "ConsultaWhois",
+    "LocalizadorGeo",
+    "RespostaHTTP",
+    "SessaoHTTP",
     # scan / serviços
     "PORTAS_CONHECIDAS",
     "PortScanner",

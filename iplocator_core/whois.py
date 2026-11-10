@@ -14,6 +14,7 @@ import requests
 
 from .cache import CacheManager
 from .http import criar_sessao
+from .protocols import SessaoHTTP
 from .validation import identificar_alvo
 
 #: Servico publico que redireciona para o RDAP do RIR/registro correto.
@@ -343,13 +344,15 @@ class WhoisClient:
     def __init__(
         self,
         cache: Optional[CacheManager] = None,
-        session: Optional[requests.Session] = None,
+        session: Optional[SessaoHTTP] = None,
         timeout: float = 10.0,
         usar_rdap: bool = True,
         usar_porta43: bool = True,
     ) -> None:
         self.cache = cache
-        self.session = session if session is not None else criar_sessao()
+        self.session: SessaoHTTP = (
+            session if session is not None else criar_sessao()
+        )
         self.timeout = float(timeout)
         self.usar_rdap = bool(usar_rdap)
         self.usar_porta43 = bool(usar_porta43)
