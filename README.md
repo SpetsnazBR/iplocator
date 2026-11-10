@@ -4,7 +4,7 @@
 
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/)
 [![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-green.svg)](LICENSE)
-[![Testes](https://img.shields.io/badge/testes-234%20passando-brightgreen.svg)](#-testes)
+[![Testes](https://img.shields.io/badge/testes-236%20passando-brightgreen.svg)](#-testes)
 [![Vue](https://img.shields.io/badge/Vue-3%20(CDN)-42b883.svg)](https://vuejs.org/)
 
 > ⚠️ Use apenas em redes próprias ou com autorização explícita. Veja [Limitações e ética](#-limitações-e-ética).
@@ -36,7 +36,7 @@
 | 🔍 **Scanner com detecção de serviços** | 68 portas catalogadas, *banner grabbing*, HTTP `HEAD` e handshake TLS com leitura de certificado (CN/SAN/emissor) |
 | 📇 **WHOIS + RDAP** | Consulta RDAP (JSON) com *fallback* para o WHOIS clássico na porta 43, seguindo a referência do IANA |
 | 🖥️ **Interface web estática** | Vue 3 via CDN, sem bundler: abas de geolocalização, portas, WHOIS e cache servidas por uma API local em `http.server` |
-| 🧪 **234 testes** | `pytest` cobrindo parsers, cache, fallback, scanner, WHOIS, API e CLI — **nenhum teste acessa a internet** |
+| 🧪 **236 testes** | `pytest` cobrindo parsers, cache, fallback, scanner, WHOIS, API e CLI — **nenhum teste acessa a internet** |
 | 🧩 **Compatível com a v1** | `IPLocator` e `PortScanner` continuam importáveis de `iplocator.py` com os mesmos métodos |
 
 ## 🏗️ Arquitetura
@@ -49,6 +49,7 @@ iplocator/
 │   ├── cache.py               # TTLCache e CacheManager (TTL, LRU, disco, estatísticas)
 │   ├── geo.py                 # 6 provedores de geolocalização + fallback + cache
 │   ├── http.py                # sessão requests compartilhada (retry/backoff, UA)
+│   ├── protocols.py           # Protocols de injeção (sessão/localizador/WHOIS)
 │   ├── scanner.py             # scanner multithread (ThreadPoolExecutor) + cache
 │   ├── services.py            # banner grabbing, HTTP, TLS e catálogo de portas
 │   ├── validation.py          # validação/resolução de IP e domínio
@@ -58,10 +59,11 @@ iplocator/
 │   ├── index.html
 │   ├── app.js
 │   └── styles.css
-├── tests/                     # suíte pytest (234 testes, 100% offline)
+├── tests/                     # suíte pytest (236 testes, 100% offline)
 ├── requirements.txt           # dependências de execução
-├── requirements-dev.txt       # dependências de desenvolvimento (pytest)
-└── pyproject.toml             # empacotamento, entry point `iplocator` e config do pytest
+├── requirements-dev.txt       # dependências de desenvolvimento (pytest, pyright)
+├── pyproject.toml             # empacotamento, entry point `iplocator`, pytest e Pyright
+└── .vscode/settings.json      # interpretador do venv, extraPaths e pytest no editor
 ```
 
 **Fluxo de dados**
@@ -459,7 +461,7 @@ Exemplo de resposta de `/api/geo` (campos abreviados):
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest                 # 234 testes
+python -m pytest                 # 236 testes
 python -m pytest -q tests/test_cache.py
 python -m pytest -k "fallback or cache" -v
 ```
@@ -484,6 +486,36 @@ Para isso são usados:
 | `test_whois.py` | `parse_rdap`, `parse_whois_texto`, RDAP→porta 43, cache, erros |
 | `test_web_api.py` | todos os endpoints, códigos de erro, CORS, estáticos, traversal |
 | `test_cli.py` | parser, formatação, `--json`, menu, `--clear-cache`, `--serve` |
+
+### Verificação de tipos
+
+O projeto usa **Pyright** (o mesmo motor do **Pylance** no VS Code) em modo `basic`,
+configurado em `[tool.pyright]` do `pyproject.toml`:
+
+```bash
+pip install -r requirements-dev.txt     # pytest + pyright
+python -m pyright                       # 0 errors, 0 warnings
+```
+
+Os pontos de injeção de dependência (sessão HTTP, localizador e cliente WHOIS) são
+descritos por **Protocols** (`iplocator_core/protocols.py`), então os dublês da suíte
+são validados estruturalmente — o editor e os testes concordam sobre os tipos.
+
+### Sublinhados vermelhos no VS Code
+
+Se os `.py` aparecerem com linhas vermelhas, na ordem de probabilidade:
+
+1. **Interpretador errado** — o Pylance está usando o Python do sistema, que não tem
+   `requests`/`pyfiglet`/`pytest` instalados. Confirme em *Python: Select Interpreter*
+   que está escolhido `.venv/bin/python` (o `.vscode/settings.json` do repositório já
+   aponta para ele). Sintoma típico: *“Import 'requests' could not be resolved”*.
+2. **Ambiente não instalado** — rode `pip install -r requirements-dev.txt` dentro do venv.
+3. **Erro real de tipo/código** — rode `python -m pyright` e `python -m pytest`:
+   é a mesma checagem que o editor faz, mas com saída no terminal.
+
+O `.vscode/settings.json` versionado define interpretador, `extraPaths`
+(`.` e `tests/`), modo de checagem e a integração do pytest com a pasta `tests/`.
+
 
 
 ## ⚠️ Limitações e ética
