@@ -2,9 +2,11 @@
 
 **Ferramenta OSINT em Python** para geolocalização de IPs/domínios, scanner de portas com detecção de serviços e consulta WHOIS/RDAP — com **CLI interativa**, **comandos de linha de comando** e **interface web estática em Vue 3** (sem etapa de build).
 
+[![Release](https://img.shields.io/github/v/release/SpetsnazBR/iplocator?sort=semver&label=release)](https://github.com/SpetsnazBR/iplocator/releases)
+[![CI](https://github.com/SpetsnazBR/iplocator/actions/workflows/ci.yml/badge.svg)](https://github.com/SpetsnazBR/iplocator/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/)
 [![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-green.svg)](LICENSE)
-[![Testes](https://img.shields.io/badge/testes-236%20passando-brightgreen.svg)](#-testes)
+[![Testes](https://img.shields.io/badge/testes-246%20passando-brightgreen.svg)](#-testes)
 [![Vue](https://img.shields.io/badge/Vue-3%20(CDN)-42b883.svg)](https://vuejs.org/)
 
 > ⚠️ Use apenas em redes próprias ou com autorização explícita. Veja [Limitações e ética](#-limitações-e-ética).
@@ -24,6 +26,7 @@
 - [API HTTP](#-api-http)
 - [Testes](#-testes)
 - [Limitações e ética](#-limitações-e-ética)
+- [Releases e versionamento](#-releases-e-versionamento)
 - [Contribuição](#-contribuição)
 - [Licença](#-licença)
 
@@ -36,7 +39,7 @@
 | 🔍 **Scanner com detecção de serviços** | 68 portas catalogadas, *banner grabbing*, HTTP `HEAD` e handshake TLS com leitura de certificado (CN/SAN/emissor) |
 | 📇 **WHOIS + RDAP** | Consulta RDAP (JSON) com *fallback* para o WHOIS clássico na porta 43, seguindo a referência do IANA |
 | 🖥️ **Interface web estática** | Vue 3 via CDN, sem bundler: abas de geolocalização, portas, WHOIS e cache servidas por uma API local em `http.server` |
-| 🧪 **236 testes** | `pytest` cobrindo parsers, cache, fallback, scanner, WHOIS, API e CLI — **nenhum teste acessa a internet** |
+| 🧪 **246 testes** | `pytest` cobrindo parsers, cache, fallback, scanner, WHOIS, API e CLI — **nenhum teste acessa a internet** |
 | 🧩 **Compatível com a v1** | `IPLocator` e `PortScanner` continuam importáveis de `iplocator.py` com os mesmos métodos |
 
 ## 🏗️ Arquitetura
@@ -59,9 +62,13 @@ iplocator/
 │   ├── index.html
 │   ├── app.js
 │   └── styles.css
-├── tests/                     # suíte pytest (236 testes, 100% offline)
+├── tests/                     # suíte pytest (246 testes, 100% offline)
+├── tools/
+│   └── notas_release.py       # valida a tag e extrai as notas do CHANGELOG
+├── .github/workflows/         # CI (testes/tipos/pacote) e Release (tag v*)
+├── CHANGELOG.md               # histórico no formato Keep a Changelog
 ├── requirements.txt           # dependências de execução
-├── requirements-dev.txt       # dependências de desenvolvimento (pytest, pyright)
+├── requirements-dev.txt       # dependências de desenvolvimento (pytest, pyright, build)
 ├── pyproject.toml             # empacotamento, entry point `iplocator`, pytest e Pyright
 └── .vscode/settings.json      # interpretador do venv, extraPaths e pytest no editor
 ```
@@ -110,9 +117,24 @@ iplocator --version
 Para desenvolvimento/testes:
 
 ```bash
-pip install -r requirements-dev.txt   # inclui pytest
+pip install -r requirements-dev.txt   # pytest + pyright + build
 # ou: pip install -e ".[dev]"
 ```
+
+### Instalar a partir da release (sem clonar)
+
+Cada release publica `iplocator-X.Y.Z-py3-none-any.whl` e o `.tar.gz`
+correspondente, já com a interface web embutida:
+
+```bash
+# wheel da última release (troque a versão se necessário)
+pip install https://github.com/SpetsnazBR/iplocator/releases/download/v2.0.0/iplocator-2.0.0-py3-none-any.whl
+
+iplocator --version
+iplocator --serve            # interface web servida de <venv>/share/iplocator/web
+```
+
+O GitHub também disponibiliza **Source code (zip/tar.gz)** para cada tag.
 
 ## 🚀 Uso rápido
 
@@ -199,6 +221,11 @@ Recursos adicionais da UI:
 
 > O CDN do Vue exige internet no navegador. Sem rede, a página exibe uma mensagem
 > indicando o uso da CLI (`python iplocator.py --geo 8.8.8.8`).
+
+O diretório da interface é resolvido por `resolver_diretorio_web()`:
+`IPLOCATOR_WEB_DIR` → `web/` na raiz do repositório → `<prefix>/share/iplocator/web`
+(instalação via `pip`) → `./web`. A primeira opção que tiver `index.html` vence,
+então o wheel publicado na release funciona sem precisar do repositório.
 
 ## ⌨️ CLI
 
@@ -461,7 +488,7 @@ Exemplo de resposta de `/api/geo` (campos abreviados):
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest                 # 236 testes
+python -m pytest                 # 246 testes
 python -m pytest -q tests/test_cache.py
 python -m pytest -k "fallback or cache" -v
 ```
@@ -542,6 +569,48 @@ O `.vscode/settings.json` versionado define interpretador, `extraPaths`
 2. Respeite a privacidade e os termos de serviço das APIs utilizadas.
 3. Não use os dados para perseguição, doxxing ou vigilância.
 4. Verifique a legislação local antes de qualquer uso.
+
+## 🚢 Releases e versionamento
+
+O projeto segue [Versionamento Semântico](https://semver.org/lang/pt-BR/) e cada
+release é uma **tag anotada** `vX.Y.Z` com wheel + sdist anexados.
+
+| Item | Onde |
+| --- | --- |
+| Histórico de mudanças | [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog) |
+| Versão do código | `iplocator_core/version.py` (fonte única) e `pyproject.toml` |
+| Downloads | [Releases](https://github.com/SpetsnazBR/iplocator/releases) |
+| Automação | `.github/workflows/ci.yml` (testes/tipos/pacote) e `release.yml` (tag `v*`) |
+
+### Como publicar uma nova versão
+
+```bash
+# 1) atualize a versão nos dois arquivos (precisam ser iguais)
+#    iplocator_core/version.py  ->  __version__ = "2.0.1"
+#    pyproject.toml             ->  version = "2.0.1"
+
+# 2) documente a mudança no CHANGELOG.md (seção "## [2.0.1] - AAAA-MM-DD")
+
+# 3) valide localmente (o script falha se tag e versão divergirem)
+python -m pytest
+python tools/notas_release.py v2.0.1 --saida /tmp/notas.md
+
+# 4) crie e envie a tag anotada — isso dispara o workflow de release
+git tag -a v2.0.1 -m "IP-Locator v2.0.1"
+git push origin v2.0.1
+```
+
+O workflow **Release** então:
+
+1. valida que a tag corresponde à versão do código;
+2. roda a suíte de testes;
+3. constrói `sdist` + `wheel` (`python -m build`);
+4. cria/atualiza a release no GitHub com as notas extraídas do `CHANGELOG.md`
+   e anexa os artefatos (`gh release create ... --notes-file`).
+
+A lista de tags e o histórico ficam em
+[Releases](https://github.com/SpetsnazBR/iplocator/releases) e
+[Tags](https://github.com/SpetsnazBR/iplocator/tags).
 
 ## 🤝 Contribuição
 
