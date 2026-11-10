@@ -1,383 +1,524 @@
-import requests
+#!/usr/bin/env python3
+"""IP-Locator — CLI de OSINT (geolocalização, portas e WHOIS).
+
+Uso rápido::
+
+    python iplocator.py                      # menu interativo
+    python iplocator.py --serve              # interface web (Vue) local
+    python iplocator.py --geo 8.8.8.8 --json # consulta única, saída JSON
+
+A compatibilidade com a v1 é mantida: ``IPLocator`` e ``PortScanner`` seguem
+importáveis daqui, com os mesmos métodos públicos.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
 import sys
-import re
-import socket
-import time
-import threading
-from typing import Optional, Dict, Union, List
+from typing import Any, Dict, List, Optional, Sequence
 
-class IPLocator:
-    def __init__(self, use_https: bool = False):        
-        self.base_url = "https://ip-api.com/json/" if use_https else "http://ip-api.com/json/"
-        self.timeout = 10
-        self.headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-        self.last_request_time = 0
-        self.min_request_interval = 1.0
+from iplocator_core import (
+    CacheManager,
+    IPLocator,
+    PortScanner,
+    WhoisClient,
+    __version__,
+    descrever_servico,
+    identificar_alvo,
+    normalizar_intervalo,
+    resolver_dominio,
+)
+from iplocator_core.api import DIRETORIO_WEB_PADRAO, servir
 
-    def validar_ip(self, ip: str) -> bool:        
-        if not ip or ip.strip() == '':
-            return False
-            
-        ipv4_pattern = r'^(\d{1,3}\.){3}\d{1,3}$'
-        if re.match(ipv4_pattern, ip):
-            partes = ip.split('.')
-            if all(0 <= int(p) <= 255 for p in partes):
-                return True
-        
-        ipv6_pattern = r'^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$'
-        if re.match(ipv6_pattern, ip):
-            return True
-            
-        return False
+__all__ = [
+    "IPLocator",
+    "PortScanner",
+    "WhoisClient",
+    "CacheManager",
+    "exibir_banner",
+    "exibir_menu",
+    "exibir_resultado",
+    "formatar_geo",
+    "formatar_whois",
+    "ler_opcao",
+    "main",
+]
 
-    def is_ip_reservado(self, ip: str) -> bool:        
-        if not ip:
-            return False
-            
-        if ip == '0.0.0.0' or ip == '127.0.0.1' or ip == '255.255.255.255':
-            return True
-            
-        if ip.startswith('10.'):
-            return True
-        if ip.startswith('192.168.'):
-            return True
-        if ip.startswith('172.'):
-            partes = ip.split('.')
-            if len(partes) >= 2:
-                try:
-                    segundo_octeto = int(partes[1])
-                    if 16 <= segundo_octeto <= 31:
-                        return True
-                except ValueError:
-                    pass
-                        
-        if ip == '::1' or ip == '::' or ip == 'fe80::' or ip.startswith('fc00:'):
-            return True
-            
-        return False
+# Códigos ANSI usados no terminal.
+VERMELHO = "\033[31m"
+AMARELO = "\033[33m"
+NEGRITO = "\033[1m"
+RESET = "\033[0m"
 
-    def resolver_dominio(self, dominio: str) -> Optional[str]:        
-        try:
-            return socket.gethostbyname(dominio)
-        except (socket.gaierror, socket.herror):
-            return None
+#: Rótulos exibidos para cada campo da geolocalização.
+ROTULOS_GEO = {
+    "provider": "Provedor",
+    "country": "País",
+    "countryCode": "Código",
+    "regionName": "Região",
+    "city": "Cidade",
+    "zip": "CEP",
+    "lat": "Latitude",
+    "lon": "Longitude",
+    "timezone": "Fuso",
+    "isp": "ISP",
+    "org": "Organização",
+    "as": "ASN",
+}
 
-    def _esperar_rate_limit(self):        
-        tempo_atual = time.time()
-        tempo_decorrido = tempo_atual - self.last_request_time
-        if tempo_decorrido < self.min_request_interval:
-            time.sleep(self.min_request_interval - tempo_decorrido)
-        self.last_request_time = time.time()
 
-    def localizar(self, alvo: str) -> Union[Dict, str]:        
-        if not alvo or alvo.strip() == '':
-            return "Erro: Por favor, digite um IP ou domínio válido."
-        
-        if self.validar_ip(alvo):
-            ip = alvo
-            if self.is_ip_reservado(ip):
-                return f"Erro: IP reservado ({ip}) não pode ser localizado. Use um IP público."
-        else:
-            print(f"[*] Resolvendo domínio: {alvo}")
-            ip = self.resolver_dominio(alvo)
-            if not ip:
-                return f"Erro: Não foi possível resolver o domínio '{alvo}'"
-            print(f"[*] Domínio resolvido para IP: {ip}")
-            if self.is_ip_reservado(ip):
-                return f"Erro: Domínio resolve para IP reservado ({ip})"
-        
-        try:
-            self._esperar_rate_limit()
-            
-            response = requests.get(
-                f"{self.base_url}{ip}", 
-                timeout=self.timeout,
-                headers=self.headers
+# ----------------------------------------------------------------------
+# Interface de terminal
+# ----------------------------------------------------------------------
+def exibir_banner() -> None:
+    """Mostra o banner estilizado em vermelho (pyfiglet é opcional)."""
+    try:
+        from pyfiglet import Figlet
+    except ImportError:  # dependência opcional: segue sem o banner estilizado
+        print(f"{VERMELHO}{NEGRITO}IP Locator {__version__}{RESET}")
+        return
+    banner = Figlet(font="slant").renderText("IP Locator")
+    print(f"{VERMELHO}{banner}{RESET}")
+
+
+def exibir_menu() -> None:
+    """Menu principal apresentado ao usuário."""
+    print(f"\n{NEGRITO}=== MENU ==={RESET}")
+    print("1 – Localizar IP / domínio")
+    print("2 – Escanear intervalo de portas")
+    print("3 – Escanear portas comuns")
+    print("4 – Consultar WHOIS / RDAP")
+    print("5 – Cache (estatísticas / limpar)")
+    print("6 – Abrir interface web (servidor local)")
+    print("0 – Sair")
+    print("-" * 30)
+
+
+def ler_opcao() -> str:
+    """Lê a opção do usuário, garantindo que seja válida."""
+    validas = {"0", "1", "2", "3", "4", "5", "6"}
+    opcao = input("\nEscolha uma opção: ").strip()
+    while opcao not in validas:
+        print("Opção inválida. Use 0, 1, 2, 3, 4, 5 ou 6.")
+        opcao = input("Escolha uma opção: ").strip()
+    return opcao
+
+
+# ----------------------------------------------------------------------
+# Formatação de saída (funções puras — cobertas pelos testes)
+# ----------------------------------------------------------------------
+def formatar_geo(dados: Dict[str, Any]) -> List[str]:
+    """Monta as linhas de saída de um resultado de geolocalização."""
+    linhas: List[str] = []
+    chaves = ("provider",) + tuple(
+        chave for chave in ROTULOS_GEO if chave != "provider"
+    )
+    for chave in chaves:
+        valor = dados.get(chave)
+        if valor in (None, ""):
+            continue
+        linhas.append(f"{ROTULOS_GEO.get(chave, chave.capitalize()):13}: {valor}")
+    if dados.get("cache"):
+        linhas.append(f"{'Cache':13}: reaproveitado")
+    if dados.get("maps_url"):
+        linhas.append(f"{'Mapa':13}: {dados['maps_url']}")
+    return linhas
+
+
+def formatar_whois(detalhe: Dict[str, Any]) -> List[str]:
+    """Monta as linhas de saída de um resultado WHOIS/RDAP."""
+    dados = detalhe.get("dados") or {}
+    linhas = [f"{'Fonte':13}: {detalhe.get('fonte') or 'desconhecida'}"]
+    if detalhe.get("cache"):
+        linhas.append(f"{'Cache':13}: reaproveitado")
+    campos = (
+        ("handles", "Handle"),
+        ("nome", "Nome"),
+        ("netname", "Netname"),
+        ("organizacao", "Organização"),
+        ("pais", "País"),
+        ("tipo", "Tipo"),
+        ("intervalo", "Intervalo"),
+        ("abuse_contato", "Abuso"),
+        ("servidor", "Servidor"),
+    )
+    for chave, rotulo in campos:
+        valor = dados.get(chave)
+        if isinstance(valor, dict):
+            valor = " - ".join(
+                str(parte) for parte in valor.values() if parte not in (None, "")
             )
-            response.raise_for_status()
-            
-            data = response.json()
+        if isinstance(valor, list):
+            valor = ", ".join(str(parte) for parte in valor[:4])
+        if valor in (None, "", (), []):
+            continue
+        linhas.append(f"{rotulo:13}: {valor}")
+    eventos = dados.get("eventos") or {}
+    if isinstance(eventos, dict):
+        for acao, data in list(eventos.items())[:4]:
+            linhas.append(f"{acao[:13]:13}: {data}")
+    descricao = dados.get("descricao")
+    if isinstance(descricao, list) and descricao:
+        linhas.append(f"{'Descrição':13}: {' | '.join(descricao[:3])}")
+    return linhas
 
-            if data.get('status') == 'success':
-                return data
-            else:
-                mensagem = data.get('message', 'IP inválido ou não encontrado')
-                return f"Erro da API: {mensagem}"
-                
-        except requests.exceptions.Timeout:
-            return "Erro: Timeout na conexão com a API"
-        except requests.exceptions.ConnectionError:
-            return "Erro: Não foi possível conectar à API"
-        except requests.exceptions.HTTPError as e:
-            return f"Erro HTTP: {e}"
-        except requests.exceptions.RequestException as e:
-            return f"Erro na requisição: {e}"
-        except ValueError as e:
-            return f"Erro ao processar resposta da API: {e}"
+# ----------------------------------------------------------------------
+# Execução de consultas (usadas pela CLI e pelo menu)
+# ----------------------------------------------------------------------
+def executar_geo(
+    locator: IPLocator,
+    alvo: str,
+    saida_json: bool = False,
+) -> int:
+    """Consulta a geolocalização e imprime o resultado."""
+    detalhe = locator.localizar_detalhado(alvo)
+    if saida_json:
+        print(json.dumps(detalhe, ensure_ascii=False, indent=2, default=str))
+        return 0 if detalhe.get("ok") else 1
+    if not detalhe.get("ok"):
+        print(f"{VERMELHO}{detalhe.get('erro')}{RESET}", file=sys.stderr)
+        for erro in detalhe.get("erros", []):
+            print(f"  - {erro['provider']}: {erro['erro']}", file=sys.stderr)
+        return 1
+    exibir_resultado(detalhe.get("dados") or {})
+    return 0
 
-class PortScanner:      
-    PORTAS_COMUNS = {
-        20: "FTP (Data)",
-        21: "FTP (Control)",
-        22: "SSH",
-        23: "Telnet",
-        25: "SMTP",
-        53: "DNS",
-        80: "HTTP",
-        110: "POP3",
-        143: "IMAP",
-        443: "HTTPS",
-        465: "SMTPS",
-        587: "SMTP (Submission)",
-        993: "IMAPS",
-        995: "POP3S",
-        3306: "MySQL",
-        3389: "RDP",
-        5432: "PostgreSQL",
-        8080: "HTTP Proxy",
-        8443: "HTTPS Alt"
-    }
-    
-    def __init__(self, timeout: float = 1.0, max_threads: int = 50):
-        
-        self.timeout = timeout
-        self.max_threads = max_threads
-        self.portas_abertas = []
-        self.lock = threading.Lock()
-    
-    def testar_porta(self, host: str, porta: int) -> bool:
-        
-        if porta < 1 or porta > 65535:
-            return False
-            
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(self.timeout)
-            resultado = sock.connect_ex((host, porta))
-            sock.close()
-            return resultado == 0
-        except (socket.timeout, socket.error, OSError, ValueError):
-            return False
-    
-    def scan_porta(self, host: str, porta: int):
-        
-        if self.testar_porta(host, porta):
-            with self.lock:
-                self.portas_abertas.append(porta)
-                servico = self.PORTAS_COMUNS.get(porta, "Desconhecido")
-                print(f"  [+] Porta {porta} aberta - {servico}")
-    
-    def scan_intervalo(self, host: str, inicio: int = 1, fim: int = 1024) -> List[int]:
-        
-        print(f"\n[*] Iniciando scan de portas em {host} (portas {inicio}-{fim})...")
-        print(f"[*] Timeout: {self.timeout}s | Threads: {self.max_threads}")
-        
-        self.portas_abertas = []
-        threads = []
-        portas_para_scan = list(range(inicio, fim + 1))
-        
-        for i, porta in enumerate(portas_para_scan):
-            thread = threading.Thread(target=self.scan_porta, args=(host, porta))
-            threads.append(thread)
-            thread.start()
-            
-            if len(threads) >= self.max_threads or i == len(portas_para_scan) - 1:
-                for t in threads:
-                    t.join()
-                threads = []
-        
-        print(f"\n[*] Scan concluído! {len(self.portas_abertas)} porta(s) aberta(s).")
-        return sorted(self.portas_abertas)
-    
-    def scan_portas_comuns(self, host: str) -> List[int]:
-        
-        print(f"\n[*] Escaneando portas comuns em {host}...")
-        self.portas_abertas = []
-        
-        for porta, servico in self.PORTAS_COMUNS.items():
-            if self.testar_porta(host, porta):
-                self.portas_abertas.append(porta)
-                print(f"  [+] Porta {porta} aberta - {servico}")
-        
-        print(f"\n[*] Scan concluído! {len(self.portas_abertas)} porta(s) comum(ns) aberta(s).")
-        return sorted(self.portas_abertas)
 
-def exibir_resultado(info: Dict):
-    
-    print("\n" + "="*40)
-    print("📍 LOCALIZAÇÃO ENCONTRADA")
-    print("="*40)
-    print(f"🌐 IP:           {info.get('query', 'N/A')}")
-    print(f"🏳️ País:         {info.get('country', 'N/A')} ({info.get('countryCode', 'N/A')})")
-    print(f"🏙️ Região:       {info.get('regionName', 'N/A')}")
-    print(f"🏙️ Cidade:       {info.get('city', 'N/A')}")
-    print(f"📮 CEP:          {info.get('zip', 'N/A')}")
-    print(f"🕐 Fuso Horário: {info.get('timezone', 'N/A')}")
-    print(f"🏢 Provedor/ISP: {info.get('isp', 'N/A')}")
-    print(f"📡 Organização:  {info.get('org', 'N/A')}")
-    print(f"🗺️ Lat/Long:     {info.get('lat', 'N/A')}, {info.get('lon', 'N/A')}")
-    
-    lat = info.get('lat')
-    lon = info.get('lon')
-    if lat and lon:
-        print(f"🔗 Google Maps:  https://www.google.com/maps?q={lat},{lon}")
-        print(f"🔗 OpenStreetMap: https://www.openstreetmap.org/?mlat={lat}&mlon={lon}")
-    
-    print("="*40)
+def executar_whois(
+    cliente: WhoisClient,
+    alvo: str,
+    saida_json: bool = False,
+) -> int:
+    """Consulta WHOIS/RDAP e imprime o resultado."""
+    detalhe = cliente.consultar_detalhado(alvo)
+    if saida_json:
+        print(json.dumps(detalhe, ensure_ascii=False, indent=2, default=str))
+        return 0 if detalhe.get("ok") else 1
+    if not detalhe.get("ok"):
+        print(f"{VERMELHO}{detalhe.get('erro')}{RESET}", file=sys.stderr)
+        return 1
+    print(f"\n{NEGRITO}=== WHOIS / RDAP ==={RESET}")
+    for linha in formatar_whois(detalhe):
+        print(linha)
+    return 0
 
-def menu():
-    locator = IPLocator(use_https=False)
-    scanner = PortScanner(timeout=1.0, max_threads=100)
-    
-    print("-" * 60)
-    print("🌍 LOCALIZADOR DE IP GEOGRÁFICO + SCANNER DE PORTAS - FERRAMENTA OSINT")
-    print("-" * 60)
-    print("[i] Digite 'sair' para encerrar")
-    print("[i] Suporta IPs (IPv4/IPv6) e domínios (ex: google.com)")
-    print("[i] Usando API HTTP (45 requisições/minuto)")
-    print("[i] Scanner de portas com suporte a multithreading")
-    print("-" * 60)
-    
+
+def executar_scan(
+    cache: CacheManager,
+    alvo: str,
+    modo: str = "comuns",
+    inicio: int = 1,
+    fim: int = 1024,
+    timeout: float = 1.0,
+    servicos: bool = True,
+    saida_json: bool = False,
+) -> int:
+    """Executa o scan de portas (comuns ou intervalo) e imprime o resultado."""
+    info = identificar_alvo(alvo)
+    if info["tipo"] == "invalido":
+        print(
+            f"{VERMELHO}Alvo inválido: informe um IP ou domínio.{RESET}",
+            file=sys.stderr,
+        )
+        return 2
+    host = info["ip"] or resolver_dominio(str(info["entrada"]))
+    if not host:
+        print(
+            f"{VERMELHO}Não foi possível resolver '{alvo}'.{RESET}",
+            file=sys.stderr,
+        )
+        return 2
+
+    try:
+        inicio, fim = normalizar_intervalo(int(inicio), int(fim))
+    except (TypeError, ValueError) as exc:
+        print(f"{VERMELHO}Intervalo inválido: {exc}{RESET}", file=sys.stderr)
+        return 2
+
+    scanner = PortScanner(
+        timeout=timeout,
+        detectar_servicos=servicos,
+        cache=cache,
+        verbose=not saida_json,
+    )
+    if modo == "comuns":
+        scanner.scan_portas_comuns(host)
+    else:
+        scanner.scan_intervalo(host, inicio, fim)
+
+    if saida_json:
+        payload: Dict[str, Any] = {
+            "ok": True,
+            "alvo": alvo,
+            "host": host,
+            "modo": modo,
+            "intervalo": [inicio, fim],
+            "servicos": servicos,
+        }
+        payload.update(scanner.resumo())
+        print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+        return 0
+
+    if not scanner.portas_abertas:
+        print(f"\n{AMARELO}Nenhuma porta aberta encontrada.{RESET}")
+        return 0
+    print(f"\n{NEGRITO}=== Portas abertas em {host} ==={RESET}")
+    for item in scanner.resultados_ordenados():
+        print(f"  {int(item['porta']):5}  {descrever_servico(item)}")
+    return 0
+
+
+
+# ----------------------------------------------------------------------
+# Ações do menu interativo
+# ----------------------------------------------------------------------
+def menu_localizar(locator: IPLocator) -> None:
+    alvo = input("\nDigite o IP ou domínio a ser localizado: ").strip()
+    if not alvo:
+        print("Alvo vazio – operação cancelada.")
+        return
+    executar_geo(locator, alvo)
+
+
+def menu_scan_intervalo(cache: CacheManager, timeout: float = 1.0) -> None:
+    host = input("\nInforme o IP ou domínio a ser escaneado: ").strip()
+    if not host:
+        print("Alvo vazio – operação cancelada.")
+        return
+    try:
+        inicio = int(input("Porta inicial (default 1): ").strip() or "1")
+        fim = int(input("Porta final (default 1024): ").strip() or "1024")
+    except ValueError:
+        print("Valores de porta inválidos – usando 1-1024.")
+        inicio, fim = 1, 1024
+    executar_scan(
+        cache, host, modo="intervalo", inicio=inicio, fim=fim, timeout=timeout
+    )
+
+
+def menu_scan_comuns(cache: CacheManager, timeout: float = 1.0) -> None:
+    host = input("\nInforme o IP ou domínio a ser escaneado: ").strip()
+    if not host:
+        print("Alvo vazio – operação cancelada.")
+        return
+    executar_scan(cache, host, modo="comuns", timeout=timeout)
+
+
+def menu_whois(cliente: WhoisClient) -> None:
+    alvo = input("\nDigite o IP ou domínio para consulta WHOIS: ").strip()
+    if not alvo:
+        print("Alvo vazio – operação cancelada.")
+        return
+    executar_whois(cliente, alvo)
+
+
+def menu_cache(cache: CacheManager) -> None:
+    """Mostra as estatísticas do cache e oferece a limpeza."""
+    stats = cache.stats()
+    print(f"\n{NEGRITO}=== Cache ==={RESET}")
+    print(f"{'Habilitado':13}: {'sim' if stats['habilitado'] else 'não'}")
+    print(f"{'Diretório':13}: {stats.get('diretorio') or '-'}")
+    print(f"{'Entradas':13}: {stats['entradas']}")
+    print(f"{'Hits/Misses':13}: {stats['hits']}/{stats['misses']}")
+    print(f"{'Taxa de acerto':13}: {stats['taxa_acerto'] * 100:.1f}%")
+    for nome, dados in stats.get("namespaces", {}).items():
+        print(
+            f"  - {nome:8} ttl={dados['ttl']:.0f}s "
+            f"entradas={dados['entradas']} hits={dados['hits']}"
+        )
+    if not cache.enabled:
+        return
+    resposta = input("\nLimpar o cache agora? (s/N): ").strip().lower()
+    if resposta in {"s", "sim", "y", "yes"}:
+        removidas = cache.clear()
+        print(f"[*] Cache limpo ({removidas} entrada(s) removida(s)).")
+
+
+def menu_servidor(host: str = "127.0.0.1", porta: int = 8000) -> None:
+    """Sobe a API + interface web (bloqueia até Ctrl+C)."""
+    web = Path(DIRETORIO_WEB_PADRAO)
+    if not (web / "index.html").is_file():
+        print(
+            f"{VERMELHO}Interface web não encontrada em {web}{RESET}",
+            file=sys.stderr,
+        )
+        return
+    servir(host=host, porta=porta)
+
+
+def exibir_resultado(info: Dict[str, Any]) -> None:
+    """Imprime o resultado de uma geolocalização em formato de cartão.
+
+    Mantida como API pública desde a v1; delega a formatação para
+    :func:`formatar_geo` para não duplicar rótulos.
+    """
+    print(f"\n{NEGRITO}=== Dados do IP ==={RESET}")
+    for linha in formatar_geo(info):
+        print(linha)
+
+
+def menu_interativo(
+    locator: IPLocator,
+    whois: WhoisClient,
+    cache: CacheManager,
+    host: str = "127.0.0.1",
+    porta: int = 8000,
+    timeout: float = 1.0,
+) -> int:
+    """Loop principal do menu em linha de comando."""
+    exibir_banner()
+    print(f"[i] Provedores: {', '.join(locator.provedores_ativos())}")
+    print(f"[i] Cache: {'ativo' if cache.enabled else 'desativado'} "
+          f"({cache.directory})")
+    print("[i] Interface web: python iplocator.py --serve")
     while True:
-        try:
-            print("\n" + "="*30)
-            print("MENU PRINCIPAL")
-            print("="*30)
-            print("1. Localizar IP/Domínio")
-            print("2. Scan de portas comuns")
-            print("3. Scan completo de portas (1-1024)")
-            print("4. Scan personalizado de portas")
-            print("5. Sair")
-            print("="*30)
-            
-            opcao = input("\nEscolha uma opção (1-5): ").strip()
-            
-            if opcao == '5' or opcao.lower() in ['sair', 'exit', 'quit']:
-                print("\n[!] Encerrando...")
-                break
-            
-            if opcao == '1':
-                alvo = input("\nDigite o IP ou Domínio para localizar: ").strip()
-                
-                if not alvo:
-                    print("[!] Por favor, digite um IP ou domínio válido.")
-                    continue
-                
-                print(f"\n[*] Consultando base de dados para: {alvo}...")
-                info = locator.localizar(alvo)
+        exibir_menu()
+        opcao = ler_opcao()
+        if opcao == "0":
+            print("\nEncerrando…")
+            return 0
+        if opcao == "1":
+            menu_localizar(locator)
+        elif opcao == "2":
+            menu_scan_intervalo(cache, timeout)
+        elif opcao == "3":
+            menu_scan_comuns(cache, timeout)
+        elif opcao == "4":
+            menu_whois(whois)
+        elif opcao == "5":
+            menu_cache(cache)
+        elif opcao == "6":
+            menu_servidor(host, porta)
 
-                if isinstance(info, dict):
-                    exibir_resultado(info)
-                else:
-                    print(f"\n[!] {info}")
-            
-            elif opcao == '2':
-                alvo = input("\nDigite o IP ou Domínio para scan de portas comuns: ").strip()
-                
-                if not alvo:
-                    print("[!] Por favor, digite um IP ou domínio válido.")
-                    continue
-                
-                if locator.validar_ip(alvo):
-                    ip = alvo
-                else:
-                    print(f"[*] Resolvendo domínio: {alvo}")
-                    ip = locator.resolver_dominio(alvo)
-                    if not ip:
-                        print(f"[!] Não foi possível resolver o domínio '{alvo}'")
-                        continue
-                    print(f"[*] Domínio resolvido para IP: {ip}")
-                
-                if locator.is_ip_reservado(ip):
-                    print(f"[!] IP reservado ({ip}) não pode ser escaneado.")
-                    continue
-                
-                scanner.scan_portas_comuns(ip)
-            
-            elif opcao == '3':
-                alvo = input("\nDigite o IP ou Domínio para scan completo (portas 1-1024): ").strip()
-                
-                if not alvo:
-                    print("[!] Por favor, digite um IP ou domínio válido.")
-                    continue
-                
-                if locator.validar_ip(alvo):
-                    ip = alvo
-                else:
-                    print(f"[*] Resolvendo domínio: {alvo}")
-                    ip = locator.resolver_dominio(alvo)
-                    if not ip:
-                        print(f"[!] Não foi possível resolver o domínio '{alvo}'")
-                        continue
-                    print(f"[*] Domínio resolvido para IP: {ip}")
-                
-                if locator.is_ip_reservado(ip):
-                    print(f"[!] IP reservado ({ip}) não pode ser escaneado.")
-                    continue
-                
-                print("\n[*] AVISO: Scan completo pode levar alguns minutos...")
-                confirmacao = input("Deseja continuar? (s/n): ").strip().lower()
-                if confirmacao == 's':
-                    scanner.scan_intervalo(ip, 1, 1024)
-                else:
-                    print("[!] Scan cancelado.")
-            
-            elif opcao == '4':
-                alvo = input("\nDigite o IP ou Domínio: ").strip()
-                
-                if not alvo:
-                    print("[!] Por favor, digite um IP ou domínio válido.")
-                    continue
-                
-                if locator.validar_ip(alvo):
-                    ip = alvo
-                else:
-                    print(f"[*] Resolvendo domínio: {alvo}")
-                    ip = locator.resolver_dominio(alvo)
-                    if not ip:
-                        print(f"[!] Não foi possível resolver o domínio '{alvo}'")
-                        continue
-                    print(f"[*] Domínio resolvido para IP: {ip}")
-                
-                if locator.is_ip_reservado(ip):
-                    print(f"[!] IP reservado ({ip}) não pode ser escaneado.")
-                    continue
-                
-                try:
-                    inicio = int(input("Porta inicial (1-65535): ").strip())
-                    fim = int(input("Porta final (1-65535): ").strip())
-                    
-                    if inicio < 1 or fim > 65535 or inicio > fim:
-                        print("[!] Intervalo de portas inválido.")
-                        continue
-                    
-                    print(f"\n[*] AVISO: Scan de {fim - inicio + 1} portas pode levar algum tempo...")
-                    confirmacao = input("Deseja continuar? (s/n): ").strip().lower()
-                    if confirmacao == 's':
-                        scanner.scan_intervalo(ip, inicio, fim)
-                    else:
-                        print("[!] Scan cancelado.")
-                        
-                except ValueError:
-                    print("[!] Por favor, digite números válidos para as portas.")
-            
-            else:
-                print("[!] Opção inválida. Por favor, escolha uma opção de 1 a 5.")
-                
-        except KeyboardInterrupt:
-            print("\n\n[!] Encerrando...")
-            break
-        except (ValueError, TypeError, OSError, socket.error) as e:
-            print(f"\n[!] Erro inesperado: {e}")
+
+# ----------------------------------------------------------------------
+# CLI
+# ----------------------------------------------------------------------
+def construir_parser() -> argparse.ArgumentParser:
+    """Define os argumentos de linha de comando (também usados nos testes)."""
+    parser = argparse.ArgumentParser(
+        prog="iplocator",
+        description=(
+            "IP-Locator: geolocalização de IPs/domínios, scanner de portas com "
+            "detecção de serviços e consulta WHOIS/RDAP."
+        ),
+        epilog=(
+            "Exemplos:\n"
+            "  python iplocator.py --serve\n"
+            "  python iplocator.py --geo 8.8.8.8\n"
+            "  python iplocator.py --whois github.com --json\n"
+            "  python iplocator.py --scan 1.1.1.1 --mode comuns\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--serve", action="store_true", help="sobe a API + interface web (Vue)"
+    )
+    parser.add_argument(
+        "--host", default="127.0.0.1", help="host do servidor web (padrão: 127.0.0.1)"
+    )
+    parser.add_argument(
+        "--port", type=int, default=8000, help="porta do servidor web (padrão: 8000)"
+    )
+    parser.add_argument("--geo", metavar="ALVO", help="localiza um IP ou domínio")
+    parser.add_argument(
+        "--whois", metavar="ALVO", help="consulta WHOIS/RDAP de um IP ou domínio"
+    )
+    parser.add_argument(
+        "--scan", metavar="ALVO", help="escaneia as portas de um IP ou domínio"
+    )
+    parser.add_argument(
+        "--mode",
+        choices=("comuns", "intervalo"),
+        default="comuns",
+        help="modo do scan (padrão: comuns)",
+    )
+    parser.add_argument(
+        "--start", type=int, default=1, help="porta inicial do scan (padrão: 1)"
+    )
+    parser.add_argument(
+        "--end", type=int, default=1024, help="porta final do scan (padrão: 1024)"
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=1.0,
+        help="timeout por porta em segundos (padrão: 1.0)",
+    )
+    parser.add_argument(
+        "--no-services",
+        action="store_true",
+        help="desliga a detecção de serviços (scan mais rápido)",
+    )
+    parser.add_argument(
+        "--providers",
+        metavar="LISTA",
+        help="provedores de geolocalização separados por vírgula",
+    )
+    parser.add_argument(
+        "--https", action="store_true", help="usa HTTPS no provedor ip-api"
+    )
+    parser.add_argument(
+        "--json", action="store_true", help="imprime a saída em JSON"
+    )
+    parser.add_argument(
+        "--no-cache", action="store_true", help="desativa o cache de resultados"
+    )
+    parser.add_argument(
+        "--clear-cache", action="store_true", help="limpa o cache e encerra"
+    )
+    parser.add_argument(
+        "--verbose", action="store_true", help="mostra log detalhado do servidor"
+    )
+    parser.add_argument(
+        "--version", action="version", version=f"IP-Locator {__version__}"
+    )
+    return parser
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    """Ponto de entrada: escolhe entre CLI não interativa e menu."""
+    args = construir_parser().parse_args(argv)
+    cache = CacheManager(enabled=not args.no_cache)
+
+    if args.clear_cache:
+        removidas = cache.clear()
+        print(f"[*] Cache limpo ({removidas} entrada(s) removida(s)).")
+        return 0
+
+    if args.serve:
+        servir(host=args.host, porta=args.port, verbose=args.verbose)
+        return 0
+
+    nomes = (
+        [nome.strip() for nome in str(args.providers).split(",") if nome.strip()]
+        if args.providers
+        else None
+    )
+    locator = IPLocator(use_https=args.https, providers=nomes, cache=cache)
+    whois = WhoisClient(cache=cache)
+
+    if args.geo:
+        return executar_geo(locator, args.geo, saida_json=args.json)
+    if args.whois:
+        return executar_whois(whois, args.whois, saida_json=args.json)
+    if args.scan:
+        return executar_scan(
+            cache,
+            args.scan,
+            modo=args.mode,
+            inicio=args.start,
+            fim=args.end,
+            timeout=args.timeout,
+            servicos=not args.no_services,
+            saida_json=args.json,
+        )
+    return menu_interativo(
+        locator, whois, cache, host=args.host, porta=args.port, timeout=args.timeout
+    )
+
 
 if __name__ == "__main__":
-    try:
-        menu()
-    except (KeyboardInterrupt, SystemExit):
-        print("\n[!] Programa encerrado.")
-        sys.exit(0)
-    except (OSError, ValueError, TypeError, RuntimeError) as e:
-        print(f"\n[!] Erro fatal: {e}")
-        sys.exit(1)
+    sys.exit(main())
+
