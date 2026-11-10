@@ -113,3 +113,12 @@ Thumbs.db
 .idea/
 
 *.egg-info/
+
+# IP-Locator (cache de resultados, builds locais e assets da interface)
+.ip_locator_cache/
+cache/
+.flake8
+.coverage
+pytestdebug.log
+web/node_modules/
+package-lock.json
