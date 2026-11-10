@@ -520,9 +520,13 @@ O projeto usa **Pyright** (o mesmo motor do **Pylance** no VS Code) em modo `bas
 configurado em `[tool.pyright]` do `pyproject.toml`:
 
 ```bash
-pip install -r requirements-dev.txt     # pytest + pyright
+pip install -r requirements-dev.txt     # pytest + pyright + build
 python -m pyright                       # 0 errors, 0 warnings
 ```
+
+O `[tool.pyright]` define `venvPath = "."` e `venv = ".venv"`: o Pyright resolve
+`requests`/`pytest`/`pyfiglet` a partir da venv do projeto **mesmo sem ela estar
+ativada** no terminal (é o que o Pylance usa no VS Code e o que roda no CI).
 
 Os pontos de injeção de dependência (sessão HTTP, localizador e cliente WHOIS) são
 descritos por **Protocols** (`iplocator_core/protocols.py`), então os dublês da suíte

@@ -66,3 +66,6 @@ pythonVersion = "3.9"
 typeCheckingMode = "basic"
 extraPaths = [".", "tests"]
 reportMissingTypeStubs = "none"
+# Resolve as dependências no venv do projeto, sem depender do PATH do terminal
+venvPath = "."
+venv = ".venv"

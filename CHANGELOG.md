@@ -9,6 +9,14 @@ publicadas no GitHub são extraídas da seção correspondente abaixo.
 
 ## [Não lançado]
 
+### Corrigido
+
+- CI: a matriz do Python 3.9 passou a rodar em `ubuntu-22.04`, porque a imagem
+  `ubuntu-latest` não disponibiliza mais essa versão.
+- Pyright passou a resolver as dependências pelo venv do projeto
+  (`venvPath`/`venv` no `pyproject.toml`), eliminando falsos positivos de
+  import quando o ambiente não está ativado no terminal.
+
 ## [2.0.0] - 2026-11-10
 
 Primeira release versionada: o script monofile vira um pacote reutilizável, ganha
