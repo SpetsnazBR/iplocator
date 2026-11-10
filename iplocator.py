@@ -16,11 +16,14 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 from iplocator_core import (
     CacheManager,
+    ConsultaWhois,
     IPLocator,
+    LocalizadorGeo,
     PortScanner,
     WhoisClient,
     __version__,
@@ -167,7 +170,7 @@ def formatar_whois(detalhe: Dict[str, Any]) -> List[str]:
 # Execução de consultas (usadas pela CLI e pelo menu)
 # ----------------------------------------------------------------------
 def executar_geo(
-    locator: IPLocator,
+    locator: LocalizadorGeo,
     alvo: str,
     saida_json: bool = False,
 ) -> int:
@@ -186,7 +189,7 @@ def executar_geo(
 
 
 def executar_whois(
-    cliente: WhoisClient,
+    cliente: ConsultaWhois,
     alvo: str,
     saida_json: bool = False,
 ) -> int:

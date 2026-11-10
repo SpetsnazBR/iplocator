@@ -238,3 +238,17 @@ def test_main_serve_chama_servidor(monkeypatch) -> None:
     assert chamadas["porta"] == 9123
     assert chamadas["verbose"] is True
 
+
+def test_menu_servidor_delega_para_servir(monkeypatch) -> None:
+    """Regressão: `menu_servidor` precisa resolver o diretório web sem NameError."""
+    chamadas = {}
+    monkeypatch.setattr(iplocator, "servir", lambda **kwargs: chamadas.update(kwargs))
+    iplocator.menu_servidor(host="127.0.0.1", porta=9123)
+    assert chamadas == {"host": "127.0.0.1", "porta": 9123}
+
+
+def test_menu_servidor_sem_interface(monkeypatch, tmp_path, capsys) -> None:
+    monkeypatch.setattr(iplocator, "DIRETORIO_WEB_PADRAO", tmp_path / "web-ausente")
+    iplocator.menu_servidor(host="127.0.0.1", porta=9123)
+    assert "não encontrada" in capsys.readouterr().err
+
